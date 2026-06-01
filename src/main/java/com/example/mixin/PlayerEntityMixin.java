@@ -22,49 +22,55 @@ public abstract class PlayerEntityMixin extends LivingEntity {
         Player player = (Object) this instanceof Player ? (Player) (Object) this : null;
         if (player == null) return;
 
-        // ONLY apply changes while mid-air (not flying, swimming, or on a ladder)
+        // Apply only when airborne and moving
         if (!this.onGround() && !this.isInWater() && !this.isFallFlying() && !player.isSpectator() && !player.getAbilities().flying && !this.onClimbable()) {
             
             double strafe = movementInput.x;
             double forward = movementInput.z;
 
-            // Only calculate if the player is actively holding a movement key (W, A, S, or D)
             if (strafe != 0 || forward != 0) {
                 float yaw = this.getYRot();
                 float rad = yaw * 0.017453292F;
                 float cos = (float) Math.cos(rad);
                 float sin = (float) Math.sin(rad);
 
-                // Calculate the direction the player WANTS to go based on keys pressed
+                // Find the exact direction the camera/keys are pointing
                 double xDir = strafe * cos - forward * sin;
                 double zDir = forward * cos + strafe * sin;
 
                 double len = Math.sqrt(xDir * xDir + zDir * zDir);
                 if (len > 0.01) {
                     Vec3 wishDir = new Vec3(xDir / len, 0, zDir / len);
-
-                    // Get current horizontal velocity
                     Vec3 currentVelocity = this.getDeltaMovement();
                     
-                    // Caps the wishspeed to match traditional source movement limits
-                    double wishspeed = 0.28; 
+                    // Standard Source Engine limits: air wishspeed cap
+                    double wishspeed = 0.35; 
                     
-                    // See how much of our current speed aligns with our target direction
+                    // See how fast we are currently moving in our desired direction
                     double currentspeed = currentVelocity.x * wishDir.x + currentVelocity.z * wishDir.z;
                     double addspeed = wishspeed - currentspeed;
 
                     if (addspeed > 0) {
-                        // 32.0 mimics the high air-acceleration of standard Counter-Strike / Quake
-                        double accelSpeed = 32.0 * wishspeed * 0.05; 
+                        // High acceleration value (70.0) forces the speed to build up quickly when turning
+                        double accelSpeed = 70.0 * wishspeed * 0.05; 
                         if (accelSpeed > addspeed) {
                             accelSpeed = addspeed;
                         }
 
-                        // Gently add the acceleration to the existing velocity vectors
                         double newX = currentVelocity.x + wishDir.x * accelSpeed;
                         double newZ = currentVelocity.z + wishDir.z * accelSpeed;
 
-                        // Apply the updated speed without touching the Y-axis (leaving gravity untouched)
+                        // Calculate the absolute horizontal speed we just achieved
+                        double totalHorizontalSpeed = Math.sqrt(newX * newX + newZ * newZ);
+                        
+                        // HARD CAP: Keeps you from accelerating to infinite light-speed crashing the game
+                        double maxBhopSpeed = 1.5; 
+                        if (totalHorizontalSpeed > maxBhopSpeed) {
+                            newX = (newX / totalHorizontalSpeed) * maxBhopSpeed;
+                            newZ = (newZ / totalHorizontalSpeed) * maxBhopSpeed;
+                        }
+
+                        // Update velocity
                         this.setDeltaMovement(newX, currentVelocity.y, newZ);
                     }
                 }

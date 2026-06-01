@@ -28,41 +28,43 @@ public abstract class PlayerEntityMixin extends LivingEntity {
             double strafe = movementInput.x;
             double forward = movementInput.z;
 
-            // Only run calculations if a movement key is actively held
+            // Run calculations if ANY movement key is pressed (including W!)
             if (strafe != 0 || forward != 0) {
                 float yaw = this.getYRot();
                 float rad = yaw * 0.017453292F;
                 float cos = (float) Math.cos(rad);
                 float sin = (float) Math.sin(rad);
 
-                // Translate movement inputs to world vectors based on camera angle
+                // Translate WASD combination inputs to a single unified world vector
                 double xDir = strafe * cos - forward * sin;
                 double zDir = forward * cos + strafe * sin;
 
                 double len = Math.sqrt(xDir * xDir + zDir * zDir);
                 if (len > 0.01) {
+                    // This is the exact direction the player is trying to move horizontally
                     Vec3 wishDir = new Vec3(xDir / len, 0, zDir / len);
                     Vec3 currentVelocity = this.getDeltaMovement();
                     
-                    // Traditional Source wishspeed tracking cap per frame
-                    double wishspeed = 0.30; 
+                    // We increase the tracking speed cap so holding W doesn't clip the calculation
+                    double wishspeed = 0.45; 
                     
-                    // Measure current velocity projection along our intended direction
+                    // Project current velocity onto our movement vector
                     double currentspeed = currentVelocity.x * wishDir.x + currentVelocity.z * wishDir.z;
                     double addspeed = wishspeed - currentspeed;
 
+                    // If we are moving slower than our target direction speed, accelerate!
                     if (addspeed > 0) {
-                        // ACCELERATION LOWERED: Dropped down heavily for a smooth, progressive build-up
-                        double accelSpeed = 15.0 * wishspeed * 0.05; 
+                        // Kept at a smooth, progressive build-up rate
+                        double accelSpeed = 18.0 * wishspeed * 0.05; 
                         if (accelSpeed > addspeed) {
                             accelSpeed = addspeed;
                         }
 
-                        // Apply the new horizontal velocities smoothly
+                        // Seamlessly add the new speed to your current horizontal velocity
                         double newX = currentVelocity.x + wishDir.x * accelSpeed;
                         double newZ = currentVelocity.z + wishDir.z * accelSpeed;
 
-                        // NO SPEED CAP: Total horizontal speed is allowed to grow infinitely!
+                        // Uncapped: Speed climbs higher with every single jump
                         this.setDeltaMovement(newX, currentVelocity.y, newZ);
                     }
                 }

@@ -1,8 +1,21 @@
+The reason it feels scuffy and you can't get over blocks is because when we use ci.cancel(), we are stopping Minecraft's main physics engine entirely while you are in the air.
+
+By killing vanilla physics mid-air, we accidentally deleted two critical things:
+
+Minecraft’s Step-Assisted Physics: Usually, if you hit a block while moving forward, Minecraft temporarily lifts your character up so you slide over it. Canceling the method broke that collision detection.
+
+Horizontal Friction/Drag: Without native air resistance, your strafe keys are fighting raw velocity vectors, making the controls feel incredibly stiff, rigid, and "scuffy."
+
+Instead of fighting Minecraft's engine and overriding it entirely, we need to change our approach. We should let Minecraft do its normal math, and use our Mixin to inject extra speed based on your strafe direction.
+
+The Clean Approach: PlayerEntityMixin.java
+Replace your entire file with this version. Instead of canceling the movement (ci.cancel()), this version lets Minecraft handle the jumping, block collisions, and stepping natively, while we calculate and add the extra Source-engine style momentum on top.
+
+Java
 package com.example.mixin;
 
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.MoverType;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.level.Level;
@@ -18,67 +31,58 @@ public abstract class PlayerEntityMixin extends LivingEntity {
         super(entityType, level);
     }
 
-    @Inject(method = "travel", at = @At("HEAD"), cancellable = true)
+    @Inject(method = "travel", at = @At("HEAD"))
     private void injectSourceMovement(Vec3 movementInput, CallbackInfo ci) {
-        Player player = (Player) (Object) this;
+        Player player = (Object) this instanceof Player ? (Player) (Object) this : null;
+        if (player == null) return;
 
-        // Ensure we only touch air movement, completely ignoring creative flight, swimming, or ladder climbing
+        // ONLY apply changes while mid-air (not flying, swimming, or on a ladder)
         if (!this.onGround() && !this.isInWater() && !this.isFallFlying() && !player.isSpectator() && !player.getAbilities().flying && !this.onClimbable()) {
             
-            // Get movement keys (Strafe = A/D, Forward = W/S)
             double strafe = movementInput.x;
             double forward = movementInput.z;
-            
-            // Calculate direction angles based on where the camera is looking
-            float yaw = this.getYRot();
-            float rad = yaw * 0.017453292F;
-            float cos = (float) Math.cos(rad);
-            float sin = (float) Math.sin(rad);
-            
-            // Translate the WASD keys into horizontal world coordinates
-            double xDir = strafe * cos - forward * sin;
-            double zDir = forward * cos + strafe * sin;
-            
-            double len = Math.sqrt(xDir * xDir + zDir * zDir);
-            Vec3 wishDir = (len > 0.01) ? new Vec3(xDir / len, 0, zDir / len) : Vec3.ZERO;
 
-            Vec3 currentVelocity = this.getDeltaMovement();
-            
-            // --- SOURCE ENGINE AIR ACCELERATION ---
-            // Air wishspeed is restricted to a small cap to allow strafe acceleration without infinite speed
-            double wishspeed = (strafe != 0 || forward != 0) ? 0.32 : 0;
-            
-            // Project current horizontal velocity onto our desired direction vector
-            double currentspeed = currentVelocity.x * wishDir.x + currentVelocity.z * wishDir.z;
-            double addspeed = wishspeed - currentspeed;
-            
-            double nextX = currentVelocity.x;
-            double nextZ = currentVelocity.z;
+            // Only calculate if the player is actively holding a movement key (W, A, S, or D)
+            if (strafe != 0 || forward != 0) {
+                float yaw = this.getYRot();
+                float rad = yaw * 0.017453292F;
+                float cos = (float) Math.cos(rad);
+                float sin = (float) Math.sin(rad);
 
-            if (addspeed > 0 && !wishDir.equals(Vec3.ZERO)) {
-                // Air accelerate scale (30.0 mimics standard Source engine air control)
-                double accelSpeed = 30.0 * wishspeed * 0.05; 
-                if (accelSpeed > addspeed) {
-                    accelSpeed = addspeed;
+                // Calculate the direction the player WANTS to go based on keys pressed
+                double xDir = strafe * cos - forward * sin;
+                double zDir = forward * cos + strafe * sin;
+
+                double len = Math.sqrt(xDir * xDir + zDir * zDir);
+                if (len > 0.01) {
+                    Vec3 wishDir = new Vec3(xDir / len, 0, zDir / len);
+
+                    // Get current horizontal velocity
+                    Vec3 currentVelocity = this.getDeltaMovement();
+                    
+                    // Caps the wishspeed to match traditional source movement limits
+                    double wishspeed = 0.28; 
+                    
+                    // See how much of our current speed aligns with our target direction
+                    double currentspeed = currentVelocity.x * wishDir.x + currentVelocity.z * wishDir.z;
+                    double addspeed = wishspeed - currentspeed;
+
+                    if (addspeed > 0) {
+                        // 32.0 mimics the high air-acceleration of standard Counter-Strike / Quake
+                        double accelSpeed = 32.0 * wishspeed * 0.05; 
+                        if (accelSpeed > addspeed) {
+                            accelSpeed = addspeed;
+                        }
+
+                        // Gently add the acceleration to the existing velocity vectors
+                        double newX = currentVelocity.x + wishDir.x * accelSpeed;
+                        double newZ = currentVelocity.z + wishDir.z * accelSpeed;
+
+                        // Apply the updated speed without touching the Y-axis (leaving gravity untouched)
+                        this.setDeltaMovement(newX, currentVelocity.y, newZ);
+                    }
                 }
-                
-                nextX += wishDir.x * accelSpeed;
-                nextZ += wishDir.z * accelSpeed;
             }
-
-            // Apply standard gravity and vertical drag matching Minecraft's engine
-            double nextY = currentVelocity.y;
-            nextY -= 0.08;
-            nextY *= 0.98;
-
-            // Set our newly calculated vectors
-            this.setDeltaMovement(nextX, nextY, nextZ);
-            
-            // Use the native travel processing loop for the move call to properly calculate step-height block collisions!
-            this.move(MoverType.SELF, this.getDeltaMovement());
-            
-            // Stop vanilla from overriding our calculations
-            ci.cancel(); 
         }
     }
 }

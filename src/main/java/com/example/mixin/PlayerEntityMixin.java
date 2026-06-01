@@ -22,24 +22,26 @@ public abstract class PlayerEntityMixin extends LivingEntity {
     private void injectTrueSourcePhysics(Vec3 movementInput, CallbackInfo ci) {
         Player player = (Player) (Object) this;
 
-        // Safely protect crawl/sneak/swim speeds from being broken
+        // Keep sneak, crawl, swim, and flight states behaving normally
         if (this.isCrouching() || this.isSwimming() || this.isVisuallyCrawling() || this.isShiftKeyDown() || player.getAbilities().flying || this.isInWater() || player.isSpectator()) {
             return; 
         }
 
-        // --- THE CRASH-PROOF GROUND BOOSTER ---
-        // If you are on the ground and jumping, we intercept it right here inside travel!
-        if (this.onGround() && player.jumping) {
+        // --- GROUND HIT BOOSTER (CRASH-PROOF & ACCESS-FIXED) ---
+        // Instead of player.jumping, we look at the vertical velocity vector. 
+        // If you hit spacebar, Minecraft sets the vertical delta movement upward.
+        if (this.onGround()) {
             Vec3 vel = this.getDeltaMovement();
-            double horizontalSpeed = Math.sqrt(vel.x * vel.x + vel.z * vel.z);
-            
-            // If we have existing speed from landing a jump, multiply it by 1.15 to stack velocity!
-            if (horizontalSpeed > 0.08) {
-                this.setDeltaMovement(vel.x * 1.15, vel.y, vel.z * 1.15);
+            if (vel.y > 0.01) { 
+                double horizontalSpeed = Math.sqrt(vel.x * vel.x + vel.z * vel.z);
+                // Preserve landing velocity and scale it up by 15% across the jump boundary
+                if (horizontalSpeed > 0.08) {
+                    this.setDeltaMovement(vel.x * 1.15, vel.y, vel.z * 1.15);
+                }
             }
         }
 
-        // --- AIR STRAFE BALANCING ---
+        // --- IN-AIR STRAFE SYSTEM ---
         if (!this.onGround() && !this.isFallFlying() && !this.onClimbable()) {
             
             double strafe = movementInput.x;
@@ -50,7 +52,7 @@ public abstract class PlayerEntityMixin extends LivingEntity {
             float cos = (float) Math.cos(rad);
             float sin = (float) Math.sin(rad);
 
-            // Translate keyboard inputs into a world direction vector
+            // Re-map keyboard inputs to world space coordinates
             double xDir = strafe * cos - forward * sin;
             double zDir = forward * cos + strafe * sin;
             
@@ -61,17 +63,17 @@ public abstract class PlayerEntityMixin extends LivingEntity {
             double nextX = currentVelocity.x;
             double nextZ = currentVelocity.z;
 
-            // Using a tiny tracking window (0.15) means your velocity vector realigns instantly.
-            // This is what lets you gain massive speed with subtle mouse turns instead of wild desk sweeps!
-            double wishspeed = (strafe != 0 || forward != 0) ? 0.15 : 0;
+            // Strict tracking cap window (0.12) makes mouse sensitivity incredibly sharp.
+            // Small mouse movements translate to maximum velocity gains.
+            double wishspeed = (strafe != 0 || forward != 0) ? 0.12 : 0;
 
             if (wishspeed > 0 && !wishDir.equals(Vec3.ZERO)) {
                 double currentspeed = nextX * wishDir.x + nextZ * wishDir.z;
                 double addspeed = wishspeed - currentspeed;
 
                 if (addspeed > 0) {
-                    // Strong, snappy air-acceleration coefficient 
-                    double accelSpeed = 310.0 * wishspeed * 0.05;
+                    // Massive acceleration multiplier tracks tiny camera changes instantly
+                    double accelSpeed = 340.0 * wishspeed * 0.05;
                     if (accelSpeed > addspeed) {
                         accelSpeed = addspeed;
                     }
@@ -80,22 +82,22 @@ public abstract class PlayerEntityMixin extends LivingEntity {
                     nextZ += wishDir.z * accelSpeed;
                 }
             } else {
-                // High momentum preservation when drifting through the air without keys pressed
+                // High air-coasting momentum preservation when drifting
                 nextX *= 0.998;
                 nextZ *= 0.998;
             }
 
-            // Normal Minecraft gravity calculations
+            // Native gravity tracking
             double nextY = currentVelocity.y;
             nextY -= 0.08; 
             nextY *= 0.98; 
 
             this.setDeltaMovement(nextX, nextY, nextZ);
             
-            // Keeps block collision scaling smooth and functional
+            // Allow collision calculation loops so block stepping remains intact
             this.move(MoverType.SELF, this.getDeltaMovement());
 
-            // Safely cancel vanilla calculations while mid-air
+            // Cancel the standard vanilla physics updates safely
             ci.cancel();
         }
     }

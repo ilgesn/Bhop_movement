@@ -18,33 +18,28 @@ public abstract class PlayerEntityMixin extends LivingEntity {
         super(entityType, level);
     }
 
-    // --- 1. GROUND TO AIR SPEED PRESERVATION ---
-    // This hooks into the exact moment you press spacebar to jump.
-    // Instead of resetting your speed to default, it grabs your current velocity and flings you forward!
-    @Inject(method = "jumpFromGround", at = @At("TAIL"))
-    private void onJumpBoost(CallbackInfo ci) {
-        Player player = (Player) (Object) this;
-        if (this.isCrouching() || this.isSwimming() || this.isInWater() || player.getAbilities().flying) return;
-
-        Vec3 vel = this.getDeltaMovement();
-        double horizontalSpeed = Math.sqrt(vel.x * vel.x + vel.z * vel.z);
-
-        // If we already have momentum from a previous jump, give it a stacking 10% boost forward!
-        if (horizontalSpeed > 0.1) {
-            this.setDeltaMovement(vel.x * 1.12, vel.y, vel.z * 1.12);
-        }
-    }
-
-    // --- 2. AIR STRAFE MATHEMATICS ---
     @Inject(method = "travel", at = @At("HEAD"), cancellable = true)
     private void injectTrueSourcePhysics(Vec3 movementInput, CallbackInfo ci) {
         Player player = (Player) (Object) this;
 
+        // Safely protect crawl/sneak/swim speeds from being broken
         if (this.isCrouching() || this.isSwimming() || this.isVisuallyCrawling() || this.isShiftKeyDown() || player.getAbilities().flying || this.isInWater() || player.isSpectator()) {
             return; 
         }
 
-        // Run ONLY when airborne
+        // --- THE CRASH-PROOF GROUND BOOSTER ---
+        // If you are on the ground and jumping, we intercept it right here inside travel!
+        if (this.onGround() && player.jumping) {
+            Vec3 vel = this.getDeltaMovement();
+            double horizontalSpeed = Math.sqrt(vel.x * vel.x + vel.z * vel.z);
+            
+            // If we have existing speed from landing a jump, multiply it by 1.15 to stack velocity!
+            if (horizontalSpeed > 0.08) {
+                this.setDeltaMovement(vel.x * 1.15, vel.y, vel.z * 1.15);
+            }
+        }
+
+        // --- AIR STRAFE BALANCING ---
         if (!this.onGround() && !this.isFallFlying() && !this.onClimbable()) {
             
             double strafe = movementInput.x;
@@ -55,7 +50,7 @@ public abstract class PlayerEntityMixin extends LivingEntity {
             float cos = (float) Math.cos(rad);
             float sin = (float) Math.sin(rad);
 
-            // Turn keyboard inputs into vector coordinates
+            // Translate keyboard inputs into a world direction vector
             double xDir = strafe * cos - forward * sin;
             double zDir = forward * cos + strafe * sin;
             
@@ -66,16 +61,17 @@ public abstract class PlayerEntityMixin extends LivingEntity {
             double nextX = currentVelocity.x;
             double nextZ = currentVelocity.z;
 
-            // Tight wishspeed tracking window so minor camera movements register
-            double wishspeed = (strafe != 0 || forward != 0) ? 0.22 : 0;
+            // Using a tiny tracking window (0.15) means your velocity vector realigns instantly.
+            // This is what lets you gain massive speed with subtle mouse turns instead of wild desk sweeps!
+            double wishspeed = (strafe != 0 || forward != 0) ? 0.15 : 0;
 
             if (wishspeed > 0 && !wishDir.equals(Vec3.ZERO)) {
                 double currentspeed = nextX * wishDir.x + nextZ * wishDir.z;
                 double addspeed = wishspeed - currentspeed;
 
                 if (addspeed > 0) {
-                    // Strong acceleration coefficient to ensure the vector snaps cleanly
-                    double accelSpeed = 240.0 * wishspeed * 0.05;
+                    // Strong, snappy air-acceleration coefficient 
+                    double accelSpeed = 310.0 * wishspeed * 0.05;
                     if (accelSpeed > addspeed) {
                         accelSpeed = addspeed;
                     }
@@ -84,18 +80,22 @@ public abstract class PlayerEntityMixin extends LivingEntity {
                     nextZ += wishDir.z * accelSpeed;
                 }
             } else {
-                // Low air friction keeps you from losing speed mid-air when W is released
-                nextX *= 0.996;
-                nextZ *= 0.996;
+                // High momentum preservation when drifting through the air without keys pressed
+                nextX *= 0.998;
+                nextZ *= 0.998;
             }
 
-            // Gravity loop
+            // Normal Minecraft gravity calculations
             double nextY = currentVelocity.y;
             nextY -= 0.08; 
             nextY *= 0.98; 
 
             this.setDeltaMovement(nextX, nextY, nextZ);
+            
+            // Keeps block collision scaling smooth and functional
             this.move(MoverType.SELF, this.getDeltaMovement());
+
+            // Safely cancel vanilla calculations while mid-air
             ci.cancel();
         }
     }

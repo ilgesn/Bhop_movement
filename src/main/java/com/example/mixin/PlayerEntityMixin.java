@@ -18,11 +18,28 @@ public abstract class PlayerEntityMixin extends LivingEntity {
         super(entityType, level);
     }
 
+    // --- 1. GROUND TO AIR SPEED PRESERVATION ---
+    // This hooks into the exact moment you press spacebar to jump.
+    // Instead of resetting your speed to default, it grabs your current velocity and flings you forward!
+    @Inject(method = "jumpFromGround", at = @At("TAIL"))
+    private void onJumpBoost(CallbackInfo ci) {
+        Player player = (Player) (Object) this;
+        if (this.isCrouching() || this.isSwimming() || this.isInWater() || player.getAbilities().flying) return;
+
+        Vec3 vel = this.getDeltaMovement();
+        double horizontalSpeed = Math.sqrt(vel.x * vel.x + vel.z * vel.z);
+
+        // If we already have momentum from a previous jump, give it a stacking 10% boost forward!
+        if (horizontalSpeed > 0.1) {
+            this.setDeltaMovement(vel.x * 1.12, vel.y, vel.z * 1.12);
+        }
+    }
+
+    // --- 2. AIR STRAFE MATHEMATICS ---
     @Inject(method = "travel", at = @At("HEAD"), cancellable = true)
     private void injectTrueSourcePhysics(Vec3 movementInput, CallbackInfo ci) {
         Player player = (Player) (Object) this;
 
-        // FIXED TYPO: Using native isCrouching() and isSwimming() to safely protect crawl/sneak speeds
         if (this.isCrouching() || this.isSwimming() || this.isVisuallyCrawling() || this.isShiftKeyDown() || player.getAbilities().flying || this.isInWater() || player.isSpectator()) {
             return; 
         }
@@ -38,7 +55,7 @@ public abstract class PlayerEntityMixin extends LivingEntity {
             float cos = (float) Math.cos(rad);
             float sin = (float) Math.sin(rad);
 
-            // Translate movement keys to world vectors based on your camera angle
+            // Turn keyboard inputs into vector coordinates
             double xDir = strafe * cos - forward * sin;
             double zDir = forward * cos + strafe * sin;
             
@@ -49,20 +66,16 @@ public abstract class PlayerEntityMixin extends LivingEntity {
             double nextX = currentVelocity.x;
             double nextZ = currentVelocity.z;
 
-            // 1. SMALLER TRACKING WINDOW (0.18):
-            // By making this smaller, your camera angle matches your speed vector much faster.
-            // This stops you from sliding violently sideways and completely kills the "wonky glide."
-            double wishspeed = (strafe != 0 || forward != 0) ? 0.18 : 0;
+            // Tight wishspeed tracking window so minor camera movements register
+            double wishspeed = (strafe != 0 || forward != 0) ? 0.22 : 0;
 
             if (wishspeed > 0 && !wishDir.equals(Vec3.ZERO)) {
                 double currentspeed = nextX * wishDir.x + nextZ * wishDir.z;
                 double addspeed = wishspeed - currentspeed;
 
                 if (addspeed > 0) {
-                    // 2. HIGHER ACCELERATION GAIN (280.0):
-                    // Because the tracking window is smaller, we punch up the acceleration coefficient.
-                    // Now, making a tiny, micro-movement with your mouse will give you maximum speed gains!
-                    double accelSpeed = 280.0 * wishspeed * 0.05;
+                    // Strong acceleration coefficient to ensure the vector snaps cleanly
+                    double accelSpeed = 240.0 * wishspeed * 0.05;
                     if (accelSpeed > addspeed) {
                         accelSpeed = addspeed;
                     }
@@ -71,22 +84,18 @@ public abstract class PlayerEntityMixin extends LivingEntity {
                     nextZ += wishDir.z * accelSpeed;
                 }
             } else {
-                // Smooth frictionless drift when gliding through the air with no keys pressed
-                nextX *= 0.998;
-                nextZ *= 0.998;
+                // Low air friction keeps you from losing speed mid-air when W is released
+                nextX *= 0.996;
+                nextZ *= 0.996;
             }
 
-            // Regular Minecraft Gravity calculations
+            // Gravity loop
             double nextY = currentVelocity.y;
             nextY -= 0.08; 
             nextY *= 0.98; 
 
             this.setDeltaMovement(nextX, nextY, nextZ);
-            
-            // Handle block collisions and stairs natively
             this.move(MoverType.SELF, this.getDeltaMovement());
-
-            // Successfully override vanilla travel physics
             ci.cancel();
         }
     }

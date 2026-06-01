@@ -1,17 +1,3 @@
-The reason it feels scuffy and you can't get over blocks is because when we use ci.cancel(), we are stopping Minecraft's main physics engine entirely while you are in the air.
-
-By killing vanilla physics mid-air, we accidentally deleted two critical things:
-
-Minecraft’s Step-Assisted Physics: Usually, if you hit a block while moving forward, Minecraft temporarily lifts your character up so you slide over it. Canceling the method broke that collision detection.
-
-Horizontal Friction/Drag: Without native air resistance, your strafe keys are fighting raw velocity vectors, making the controls feel incredibly stiff, rigid, and "scuffy."
-
-Instead of fighting Minecraft's engine and overriding it entirely, we need to change our approach. We should let Minecraft do its normal math, and use our Mixin to inject extra speed based on your strafe direction.
-
-The Clean Approach: PlayerEntityMixin.java
-Replace your entire file with this version. Instead of canceling the movement (ci.cancel()), this version lets Minecraft handle the jumping, block collisions, and stepping natively, while we calculate and add the extra Source-engine style momentum on top.
-
-Java
 package com.example.mixin;
 
 import net.minecraft.world.entity.EntityType;

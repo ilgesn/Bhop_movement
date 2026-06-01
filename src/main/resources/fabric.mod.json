@@ -1,1 +1,23 @@
-{"schemaVersion":1,"id":"bhopmovement","version":"1.0.0","name":"Bhop Movement","description":"Adds FPS-style air strafing physics to singleplayer.","entrypoints":{},"mixins":["bhopmovement.mixins.json"],"depends":{"fabricloader":">=0.15.0","minecraft":"*"}}
+{
+  "schemaVersion": 1,
+  "id": "bhopmovement",
+  "version": "${version}",
+  "name": "Bhop Movement",
+  "description": "Adds Source-style bunny hopping movement to the player.",
+  "authors": [
+    "YourName"
+  ],
+  "contact": {},
+  "license": "MIT",
+  "icon": "assets/bhopmovement/icon.png",
+  "environment": "*",
+  "entrypoints": {},
+  "mixins": [
+    "bhopmovement.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.15.0",
+    "minecraft": "*",
+    "fabric-api": "*"
+  }
+}

@@ -1,4 +1,4 @@
-Java
+
 package com.example.mixin;
 
 import net.minecraft.entity.EntityType;

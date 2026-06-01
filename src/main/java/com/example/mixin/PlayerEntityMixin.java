@@ -22,51 +22,62 @@ public abstract class PlayerEntityMixin extends LivingEntity {
     private void injectSourceMovement(Vec3 movementInput, CallbackInfo ci) {
         Player player = (Player) (Object) this;
 
-        if (!this.onGround() && !this.isInWater() && !this.isFallFlying() && !player.isSpectator() && !player.getAbilities().flying) {
+        // Ensure we only touch air movement, completely ignoring creative flight, swimming, or ladder climbing
+        if (!this.onGround() && !this.isInWater() && !this.isFallFlying() && !player.isSpectator() && !player.getAbilities().flying && !this.onClimbable()) {
+            
+            // Get movement keys (Strafe = A/D, Forward = W/S)
             double strafe = movementInput.x;
             double forward = movementInput.z;
+            
+            // Calculate direction angles based on where the camera is looking
             float yaw = this.getYRot();
-
             float rad = yaw * 0.017453292F;
             float cos = (float) Math.cos(rad);
             float sin = (float) Math.sin(rad);
             
-            double x = strafe * cos - forward * sin;
-            double z = forward * cos + strafe * sin;
+            // Translate the WASD keys into horizontal world coordinates
+            double xDir = strafe * cos - forward * sin;
+            double zDir = forward * cos + strafe * sin;
             
-            double len = Math.sqrt(x * x + z * z);
-            Vec3 wishDir = (len != 0) ? new Vec3(x / len, 0, z / len) : Vec3.ZERO;
+            double len = Math.sqrt(xDir * xDir + zDir * zDir);
+            Vec3 wishDir = (len > 0.01) ? new Vec3(xDir / len, 0, zDir / len) : Vec3.ZERO;
 
             Vec3 currentVelocity = this.getDeltaMovement();
             
-            double wishspeed = (strafe != 0 || forward != 0) ? 0.28 : 0;
+            // --- SOURCE ENGINE AIR ACCELERATION ---
+            // Air wishspeed is restricted to a small cap to allow strafe acceleration without infinite speed
+            double wishspeed = (strafe != 0 || forward != 0) ? 0.32 : 0;
+            
+            // Project current horizontal velocity onto our desired direction vector
             double currentspeed = currentVelocity.x * wishDir.x + currentVelocity.z * wishDir.z;
             double addspeed = wishspeed - currentspeed;
             
             double nextX = currentVelocity.x;
             double nextZ = currentVelocity.z;
 
-            if (addspeed > 0) {
-                double accel = 0.1 * wishspeed;
-                double accelspeed = Math.min(accel, addspeed);
+            if (addspeed > 0 && !wishDir.equals(Vec3.ZERO)) {
+                // Air accelerate scale (30.0 mimics standard Source engine air control)
+                double accelSpeed = 30.0 * wishspeed * 0.05; 
+                if (accelSpeed > addspeed) {
+                    accelSpeed = addspeed;
+                }
                 
-                nextX += wishDir.x * accelspeed;
-                nextZ += wishDir.z * accelspeed;
+                nextX += wishDir.x * accelSpeed;
+                nextZ += wishDir.z * accelSpeed;
             }
-            
-            nextX *= 0.99;
-            nextZ *= 0.99;
 
-            // --- Gravity Logic ---
+            // Apply standard gravity and vertical drag matching Minecraft's engine
             double nextY = currentVelocity.y;
-            nextY -= 0.08; 
-            nextY *= 0.98; 
+            nextY -= 0.08;
+            nextY *= 0.98;
 
-            // DIAGNOSTIC WATERMARK: This will spam your console if the NEW code is working
-            System.out.println("======> BHOP MOD IS ALIVE! Gravity Y is: " + nextY);
-
+            // Set our newly calculated vectors
             this.setDeltaMovement(nextX, nextY, nextZ);
+            
+            // Use the native travel processing loop for the move call to properly calculate step-height block collisions!
             this.move(MoverType.SELF, this.getDeltaMovement());
+            
+            // Stop vanilla from overriding our calculations
             ci.cancel(); 
         }
     }

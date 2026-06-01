@@ -2,7 +2,6 @@ package com.example.mixin;
 
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.MoverType;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.level.Level;
@@ -18,7 +17,7 @@ public abstract class PlayerEntityMixin extends LivingEntity {
         super(entityType, level);
     }
 
-    @Inject(method = "travel", at = @At("HEAD"), cancellable = true)
+    @Inject(method = "travel", at = @At("HEAD"))
     private void injectTrueSourcePhysics(Vec3 movementInput, CallbackInfo ci) {
         Player player = (Player) (Object) this;
 
@@ -27,78 +26,61 @@ public abstract class PlayerEntityMixin extends LivingEntity {
             return; 
         }
 
-        // --- GROUND HIT BOOSTER (CRASH-PROOF & ACCESS-FIXED) ---
-        // Instead of player.jumping, we look at the vertical velocity vector. 
-        // If you hit spacebar, Minecraft sets the vertical delta movement upward.
+        // --- GROUND HIT BOOSTER ---
+        // Checks if you are on the ground and moving upward (jumping) to chain momentum smoothly
         if (this.onGround()) {
             Vec3 vel = this.getDeltaMovement();
-            if (vel.y > 0.01) { 
+            if (vel.y > 0.001) { 
                 double horizontalSpeed = Math.sqrt(vel.x * vel.x + vel.z * vel.z);
-                // Preserve landing velocity and scale it up by 15% across the jump boundary
-                if (horizontalSpeed > 0.08) {
+                if (horizontalSpeed > 0.05) {
+                    // Gives your landing speed a continuous 15% push forward across the jump boundary
                     this.setDeltaMovement(vel.x * 1.15, vel.y, vel.z * 1.15);
                 }
             }
         }
 
-        // --- IN-AIR STRAFE SYSTEM ---
+        // --- MID-AIR STRAFE SYSTEM ---
+        // By removing ci.cancel(), Minecraft natively lets you scale blocks and stairs!
         if (!this.onGround() && !this.isFallFlying() && !this.onClimbable()) {
             
             double strafe = movementInput.x;
             double forward = movementInput.z;
 
-            float yaw = this.getYRot();
-            float rad = yaw * 0.017453292F;
-            float cos = (float) Math.cos(rad);
-            float sin = (float) Math.sin(rad);
+            // Only run the calculation if you release W and actively tap A or D to turn
+            if (strafe != 0 && forward == 0) {
+                float yaw = this.getYRot();
+                float rad = yaw * 0.017453292F;
+                float cos = (float) Math.cos(rad);
+                float sin = (float) Math.sin(rad);
 
-            // Re-map keyboard inputs to world space coordinates
-            double xDir = strafe * cos - forward * sin;
-            double zDir = forward * cos + strafe * sin;
-            
-            double len = Math.sqrt(xDir * xDir + zDir * zDir);
-            Vec3 wishDir = (len > 0.001) ? new Vec3(xDir / len, 0, zDir / len) : Vec3.ZERO;
+                // Map strafe keys into world direction coordinates
+                double xDir = strafe * cos;
+                double zDir = strafe * sin;
+                
+                double len = Math.sqrt(xDir * xDir + zDir * zDir);
+                Vec3 wishDir = (len > 0.001) ? new Vec3(xDir / len, 0, zDir / len) : Vec3.ZERO;
 
-            Vec3 currentVelocity = this.getDeltaMovement();
-            double nextX = currentVelocity.x;
-            double nextZ = currentVelocity.z;
+                Vec3 currentVelocity = this.getDeltaMovement();
 
-            // Strict tracking cap window (0.12) makes mouse sensitivity incredibly sharp.
-            // Small mouse movements translate to maximum velocity gains.
-            double wishspeed = (strafe != 0 || forward != 0) ? 0.12 : 0;
-
-            if (wishspeed > 0 && !wishDir.equals(Vec3.ZERO)) {
-                double currentspeed = nextX * wishDir.x + nextZ * wishDir.z;
+                // Low tracking cap (0.15) lets minor camera sweeps give maximum velocity gains
+                double wishspeed = 0.15;
+                double currentspeed = currentVelocity.x * wishDir.x + currentVelocity.z * wishDir.z;
                 double addspeed = wishspeed - currentspeed;
 
                 if (addspeed > 0) {
-                    // Massive acceleration multiplier tracks tiny camera changes instantly
-                    double accelSpeed = 340.0 * wishspeed * 0.05;
+                    // Strong acceleration coefficient mimics smooth source drifting
+                    double accelSpeed = 260.0 * wishspeed * 0.05;
                     if (accelSpeed > addspeed) {
                         accelSpeed = addspeed;
                     }
 
-                    nextX += wishDir.x * accelSpeed;
-                    nextZ += wishDir.z * accelSpeed;
+                    // Append the speed onto your existing horizontal velocities cleanly
+                    double nextX = currentVelocity.x + wishDir.x * accelSpeed;
+                    double nextZ = currentVelocity.z + wishDir.z * accelSpeed;
+
+                    this.setDeltaMovement(nextX, currentVelocity.y, nextZ);
                 }
-            } else {
-                // High air-coasting momentum preservation when drifting
-                nextX *= 0.998;
-                nextZ *= 0.998;
             }
-
-            // Native gravity tracking
-            double nextY = currentVelocity.y;
-            nextY -= 0.08; 
-            nextY *= 0.98; 
-
-            this.setDeltaMovement(nextX, nextY, nextZ);
-            
-            // Allow collision calculation loops so block stepping remains intact
-            this.move(MoverType.SELF, this.getDeltaMovement());
-
-            // Cancel the standard vanilla physics updates safely
-            ci.cancel();
         }
     }
 }

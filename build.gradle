@@ -7,7 +7,7 @@ version = project.mod_version
 group = project.maven_group
 
 repositories {
-	maven { url = "https://maven.fabricmc.net/" } // Explicit Fabric repository mirror
+	maven { url = "https://maven.fabricmc.net/" }
 	mavenCentral()
 }
 
@@ -24,9 +24,9 @@ loom {
 dependencies {
 	minecraft "com.mojang:minecraft:${project.minecraft_version}"
 	
-	// Changed to modImplementation so Loom handles the mod resolution/caching rules
-	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
-	modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+	// Standard implementation is required here for modern unobfuscated workspaces
+	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
 }
 
 processResources {
